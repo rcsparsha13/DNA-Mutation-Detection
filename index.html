@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genomic Edge Node | Clinical Pipeline</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #030712; color: #f3f4f6; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        
+        /* Strict Table Styling for the DP Matrix */
+        .matrix-wrapper { overflow: auto; max-height: 280px; background: #0f172a; border-radius: 6px; border: 1px solid #1e293b; }
+        table.dp-matrix { border-collapse: collapse; min-width: max-content; }
+        .dp-matrix td, .dp-matrix th { width: 32px; height: 32px; min-width: 32px; text-align: center; border: 1px solid #1e293b; font-size: 10px; font-family: 'JetBrains Mono', monospace; color: #64748b; transition: background-color 0.1s; }
+        .dp-matrix th { background: #020617; color: #38bdf8; font-weight: bold; position: sticky; top: 0; z-index: 2; }
+        .dp-matrix th.sticky-col { left: 0; z-index: 3; }
+        
+        .cell-base { background: #0f172a; }
+        .cell-calculated { background: #1e293b; color: #cbd5e1; }
+        .cell-path { background: #10b981 !important; color: #fff; font-weight: bold; box-shadow: inset 0 0 10px rgba(16, 185, 129, 0.4); }
+        
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #020617; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+        .tag-enzyme { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #9333ea; }
+        .tag-crispr { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid #0ea5e9; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <header class="bg-gray-950 border-b border-gray-800 p-3 flex justify-between items-center z-20">
+        <div class="flex items-center gap-3">
+            <i class="fa-solid fa-satellite-dish text-blue-500 text-xl animate-pulse"></i>
+            <div>
+                <h1 class="font-bold text-base tracking-wide text-white">GENOMIC EDGE-NODE</h1>
+                <p class="text-[10px] text-gray-500 mono uppercase">Clinical Bioinformatics & Wet-Lab Toolkit</p>
+            </div>
+        </div>
+        <div class="flex gap-3 items-center">
+            <button id="btn-export" class="hidden bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded text-xs font-bold transition-colors border border-gray-700">
+                <i class="fa-solid fa-file-csv mr-2"></i>Export DP Matrix
+            </button>
+            <div class="text-xs mono text-gray-500 px-3 py-1 bg-gray-900 border border-gray-800 rounded" id="status-indicator">
+                STATUS: <span class="text-emerald-400 font-bold">READY</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 grid grid-cols-12 gap-4 p-4 overflow-hidden h-full">
+        
+        <div class="col-span-3 flex flex-col gap-4 overflow-y-auto pr-1">
+            
+            <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 shadow-lg flex-none">
+                <h2 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 border-b border-gray-800 pb-2"><i class="fa-solid fa-vial mr-2"></i> Sequence Ingestion</h2>
+                <div class="space-y-3">
+                    <div>
+                        <label class="text-[10px] text-blue-400 font-bold uppercase block mb-1">Wildtype (Strand A)</label>
+                        <textarea id="seqA" rows="2" class="w-full bg-gray-950 border border-gray-700 rounded p-2 mono text-xs text-gray-300 uppercase focus:border-blue-500 focus:outline-none" spellcheck="false">ATGCGTACGTTAGCTAGCTGATCGATCGTAGC</textarea>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-purple-400 font-bold uppercase block mb-1">Variant Sample (Strand B)</label>
+                        <textarea id="seqB" rows="2" class="w-full bg-gray-950 border border-gray-700 rounded p-2 mono text-xs text-gray-300 uppercase focus:border-purple-500 focus:outline-none" spellcheck="false">ATGCGTACTGCCGCTAGCTGATCGGAATTCGC</textarea>
+                    </div>
+                    <button id="btn-run" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded text-xs transition-colors mt-2 shadow-[0_0_10px_rgba(37,99,235,0.4)]">
+                        <i class="fa-solid fa-microchip mr-2"></i> EXECUTE PIPELINE
+                    </button>
+                </div>
+            </div>
+
+            <div id="pathogen-panel" class="bg-gray-900 border border-gray-800 rounded-lg p-4 shadow-lg flex-none hidden">
+                <h2 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 border-b border-gray-800 pb-2"><i class="fa-solid fa-biohazard mr-2 text-red-500"></i> Pathogen Database</h2>
+                <div id="pathogen-results" class="space-y-2 text-xs"></div>
+            </div>
+
+            <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 shadow-lg flex-1 flex flex-col">
+                <h2 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 border-b border-gray-800 pb-2"><i class="fa-solid fa-scissors mr-2"></i> Restriction Enzyme Sites</h2>
+                <p class="text-[9px] text-gray-500 mb-2">Maps cloning endonuclease cut sites on the variant strain.</p>
+                <div id="enzyme-results" class="space-y-2 overflow-y-auto flex-1 text-xs mono text-gray-400">
+                    Awaiting sequence data...
+                </div>
+            </div>
+        </div>
+
+        <div class="col-span-3 flex flex-col gap-4 overflow-y-auto pr-1">
+            
+            <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 shadow-lg flex-none">
+                <h2 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 border-b border-gray-800 pb-2"><i class="fa-solid fa-chart-pie mr-2"></i> Biochemical Properties</h2>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-gray-950 border border-gray-800 rounded p-2 text-center">
+                        <div class="text-[9px] text-gray-500 uppercase font-bold">GC Content</div>
+                        <div id="stat-gc" class="text-lg mono font-bold text-blue-400">0%</div>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded p-2 text-center">
+                        <div class="text-[9px] text-gray-500 uppercase font-bold">Melting Temp (Tm)</div>
+                        <div id="stat-tm" class="text-lg mono font-bold text-orange-400">0°C</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 shadow-lg flex-none">
+                <h2 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 border-b border-gray-800 pb-2"><i class="fa-solid fa-crosshairs mr-2 text-blue-400"></i> CRISPR-Cas9 Locator</h2>
+                <p class="text-[9px] text-gray-500 mb-2">Detects SpCas9 Protospacer Adjacent Motifs (PAM: 'NGG') for targeted gene editing.</p>
+                <div id="crispr-results" class="bg-gray-950 border border-gray-800 rounded p-2 text-xs mono text-gray-400 h-24 overflow-y-auto">
+                    Awaiting sequence data...
+                </div>
+            </div>
+
+            <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 shadow-lg flex-1 flex flex-col">
+                <h2 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 border-b border-gray-800 pb-2"><i class="fa-solid fa-wave-square mr-2"></i> FASTQ Phred Quality</h2>
+                <p class="text-[9px] text-gray-500 mb-2">Hardware confidence per base pair (Ascii mapping).</p>
+                <div class="bg-gray-950 border border-gray-800 rounded p-2 flex-1 overflow-x-auto mono text-[10px] text-gray-500 tracking-[0.2em] whitespace-nowrap">
+                    <div id="fastq-seq" class="text-purple-400 mb-1"></div>
+                    <div id="fastq-qual" class="text-emerald-500"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-span-6 flex flex-col gap-4 h-full overflow-hidden">
+            
+            <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 shadow-lg h-1/2 flex flex-col">
+                <div class="flex justify-between items-center border-b border-gray-800 pb-2 mb-2">
+                    <h2 class="text-xs font-bold text-gray-500 uppercase tracking-widest"><i class="fa-solid fa-table-cells mr-2"></i> DP Optimal Alignment Matrix</h2>
+                    <span class="text-[10px] mono text-blue-400 font-bold bg-blue-900/20 px-2 py-1 rounded" id="matrix-status">IDLE</span>
+                </div>
+                <div class="matrix-wrapper" id="matrix-wrapper">
+                    <table class="dp-matrix" id="dp-table"></table>
+                </div>
+            </div>
+
+            <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 shadow-lg flex-1 flex flex-col">
+                
+                <div class="grid grid-cols-4 gap-2 mb-3">
+                    <div class="bg-gray-950 border border-gray-800 rounded p-2 flex flex-col items-center">
+                        <span class="text-[9px] text-gray-500 uppercase font-bold">Identity</span>
+                        <span id="lbl-identity" class="text-sm mono font-bold text-emerald-400">0%</span>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded p-2 flex flex-col items-center">
+                        <span class="text-[9px] text-gray-500 uppercase font-bold">Matches</span>
+                        <span id="stat-match" class="text-sm mono font-bold text-gray-300">0</span>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded p-2 flex flex-col items-center">
+                        <span class="text-[9px] text-gray-500 uppercase font-bold">SNPs</span>
+                        <span id="stat-snp" class="text-sm mono font-bold text-orange-400">0</span>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded p-2 flex flex-col items-center">
+                        <span class="text-[9px] text-gray-500 uppercase font-bold">Indels</span>
+                        <span id="stat-gap" class="text-sm mono font-bold text-red-400">0</span>
+                    </div>
+                </div>
+
+                <div class="bg-gray-950 border border-gray-800 rounded p-3 overflow-x-auto text-[11px] mono tracking-[0.2em] leading-loose whitespace-nowrap mb-2 flex-1">
+                    <div class="flex items-center"><span class="w-10 text-[9px] tracking-normal text-gray-600">REF:</span> <span id="out-ref" class="text-gray-300"></span></div>
+                    <div class="flex items-center"><span class="w-10 text-[9px] tracking-normal text-gray-600">MAP:</span> <span id="out-map" class="text-gray-500 font-bold"></span></div>
+                    <div class="flex items-center"><span class="w-10 text-[9px] tracking-normal text-gray-600">MUT:</span> <span id="out-mut" class="text-purple-400"></span></div>
+                </div>
+
+                <div class="bg-gray-950 border border-gray-800 rounded p-2 text-[10px] mono text-gray-400">
+                    <span class="text-[9px] tracking-normal text-gray-600 block mb-1">TRANSLATED AMINO ACID CHAIN (PROTEIN):</span>
+                    <span id="out-protein">Awaiting data...</span>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // Lab Databases
+        const PathogenDB = [
+            { name: "SARS-CoV-2 (Spike)", signature: "ATGCGTACTGCC", risk: "CRITICAL", color: "text-red-500" },
+            { name: "MRSA (mecA)", signature: "GCTAGCTAGCTG", risk: "HIGH", color: "text-orange-500" },
+            { name: "E. Coli (Stx1)", signature: "ATCGATCG", risk: "MODERATE", color: "text-yellow-500" }
+        ];
+
+        const EnzymesDB = [
+            { name: "EcoRI", seq: "GAATTC" },
+            { name: "BamHI", seq: "GGATCC" },
+            { name: "HindIII", seq: "AAGCTT" },
+            { name: "TaqI", seq: "TCGA" }
+        ];
+
+        const AppEngine = {
+            MATCH: 2, MISMATCH: -1, GAP: -2,
+            calcMatrix: null, seqA: "", seqB: "",
+
+            init() {
+                // Button Listeners
+                document.getElementById('btn-run').addEventListener('click', () => this.executePipeline());
+                document.getElementById('btn-export').addEventListener('click', () => this.exportCSV());
+
+                // REAL-TIME TELEMETRY LISTENER 
+                // Triggers GC%, Tm, and Pathogen scanning automatically as you type
+                const seqBInput = document.getElementById('seqB');
+                seqBInput.addEventListener('input', (e) => {
+                    let liveSeq = e.target.value.toUpperCase().replace(/[^ATCG]/g, '');
+                    if (liveSeq.length > 0) {
+                        this.calculateBiochem(liveSeq);
+                        this.screenPathogens(liveSeq);
+                    } else {
+                        // Reset if user clears the box completely
+                        document.getElementById('stat-gc').innerText = "0%";
+                        document.getElementById('stat-tm').innerText = "0°C";
+                        document.getElementById('pathogen-panel').classList.add('hidden');
+                    }
+                });
+
+                // Fire once on load to populate default data
+                const defaultSeqB = seqBInput.value.toUpperCase().replace(/[^ATCG]/g, '');
+                if (defaultSeqB) {
+                    this.calculateBiochem(defaultSeqB);
+                    this.screenPathogens(defaultSeqB);
+                }
+            },
+
+            sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); },
+
+            async executePipeline() {
+                this.seqA = document.getElementById('seqA').value.toUpperCase().replace(/[^ATCG]/g, '');
+                this.seqB = document.getElementById('seqB').value.toUpperCase().replace(/[^ATCG]/g, '');
+                if(!this.seqA || !this.seqB) return alert("Valid ATCG sequence required.");
+
+                this.lockUI(true);
+
+                // Clinical Lab Subroutines (Biochem & Pathogen are also handled live now, but run again to be safe)
+                this.calculateBiochem(this.seqB);
+                this.screenPathogens(this.seqB);
+                this.mapEnzymes(this.seqB);
+                this.locateCRISPR(this.seqB);
+                this.generateFASTQ(this.seqB);
+
+                // Core Mathematical Routine
+                const { matrix, tracebackPath } = this.computeMathOnly(this.seqA, this.seqB);
+                this.calcMatrix = matrix;
+
+                await this.renderTableVisually(matrix, tracebackPath);
+
+                const alignment = this.reconstructAlignment(tracebackPath);
+                this.computeMetrics(alignment.alignMap);
+                this.translateToProtein(alignment.alignB);
+
+                this.lockUI(false);
+            },
+
+            lockUI(isLocked) {
+                const btn = document.getElementById('btn-run');
+                if(isLocked) {
+                    btn.disabled = true;
+                    btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> PROCESSING...`;
+                    document.getElementById('status-indicator').innerHTML = `STATUS: <span class="text-blue-400 font-bold fa-fade">ANALYZING</span>`;
+                    document.getElementById('btn-export').classList.add('hidden');
+                } else {
+                    btn.disabled = false;
+                    btn.innerHTML = `<i class="fa-solid fa-microchip mr-2"></i> EXECUTE PIPELINE`;
+                    document.getElementById('status-indicator').innerHTML = `STATUS: <span class="text-emerald-400 font-bold">SUCCESS</span>`;
+                    document.getElementById('btn-export').classList.remove('hidden');
+                }
+            },
+
+            // --- WET LAB FUNCTIONS ---
+
+            calculateBiochem(seq) {
+                let gcCount = 0;
+                for(let i=0; i<seq.length; i++) if(seq[i] === 'G' || seq[i] === 'C') gcCount++;
+                let gcPct = (gcCount / seq.length) * 100;
+                document.getElementById('stat-gc').innerText = gcPct.toFixed(1) + "%";
+
+                let aCount = seq.split('A').length - 1;
+                let tCount = seq.split('T').length - 1;
+                let tm = seq.length < 14 ? (aCount + tCount)*2 + (gcCount)*4 : 64.9 + 41*(gcCount - 16.4)/seq.length;
+                document.getElementById('stat-tm').innerText = tm.toFixed(1) + "°C";
+            },
+
+            screenPathogens(seq) {
+                const panel = document.getElementById('pathogen-panel');
+                const results = document.getElementById('pathogen-results');
+                results.innerHTML = '';
+                let found = false;
+
+                PathogenDB.forEach(p => {
+                    if (seq.includes(p.signature)) {
+                        found = true;
+                        results.innerHTML += `
+                            <div class="bg-gray-950 border border-gray-800 p-2 rounded flex justify-between items-center">
+                                <div><span class="font-bold ${p.color}">${p.name}</span><span class="text-[9px] text-gray-500 block mono">MOTIF: ${p.signature}</span></div>
+                                <span class="text-[9px] bg-red-900/30 text-red-400 px-2 py-0.5 rounded border border-red-800 font-bold">${p.risk}</span>
+                            </div>`;
+                    }
+                });
+                panel.classList.toggle('hidden', !found);
+            },
+
+            mapEnzymes(seq) {
+                const container = document.getElementById('enzyme-results');
+                container.innerHTML = '';
+                let html = "";
+                EnzymesDB.forEach(enz => {
+                    let idx = seq.indexOf(enz.seq);
+                    if(idx !== -1) {
+                        html += `<div class="mb-1"><span class="tag-enzyme px-1 rounded mr-2 font-bold">${enz.name}</span> <span class="text-gray-500">Cut site at Index </span><span class="text-white">${idx}</span></div>`;
+                    }
+                });
+                container.innerHTML = html || "No common restriction sites detected.";
+            },
+
+            locateCRISPR(seq) {
+                const container = document.getElementById('crispr-results');
+                let html = "";
+                // Regex looks for [Any Base]GG (e.g. AGG, TGG, CGG, GGG)
+                let regex = /(?=([ATCG]GG))/g;
+                let match;
+                let hits = 0;
+                while ((match = regex.exec(seq)) !== null) {
+                    hits++;
+                    // Map the 20bp upstream protospacer + the 3bp PAM
+                    let pamIndex = match.index;
+                    let protospacerStart = Math.max(0, pamIndex - 20);
+                    let target = seq.substring(protospacerStart, pamIndex);
+                    let pam = seq.substring(pamIndex, pamIndex + 3);
+                    
+                    html += `<div class="mb-2 border-b border-gray-800 pb-1">
+                        <span class="text-gray-500">Idx ${pamIndex}:</span> ${target}<span class="tag-crispr px-0.5 rounded font-bold">${pam}</span>
+                    </div>`;
+                    
+                    if(hits > 4) { html += `<div class="text-gray-600 italic">...additional sites omitted.</div>`; break; }
+                    regex.lastIndex++; // Advance to allow overlapping matches
+                }
+                container.innerHTML = html || "No SpCas9 PAM ('NGG') sequences found.";
+            },
+
+            generateFASTQ(seq) {
+                // Simulates sequencer noise. 'I' is highest quality (Q40), lower ascii is worse.
+                document.getElementById('fastq-seq').innerText = seq;
+                let qual = "";
+                for(let i=0; i<seq.length; i++) {
+                    // Randomly degrade quality occasionally
+                    if(Math.random() > 0.9) qual += String.fromCharCode(Math.floor(Math.random() * 15) + 33); // Bad read ! to /
+                    else qual += "I"; // Perfect read
+                }
+                document.getElementById('fastq-qual').innerText = qual;
+            },
+
+            // --- ALGORITHMIC FUNCTIONS ---
+
+            computeMathOnly(A, B) {
+                const M = A.length, N = B.length;
+                let matrix = Array(M + 1).fill(null).map(() => Array(N + 1).fill(0));
+
+                for (let i = 0; i <= M; i++) matrix[i][0] = i * this.GAP;
+                for (let j = 0; j <= N; j++) matrix[0][j] = j * this.GAP;
+
+                for (let i = 1; i <= M; i++) {
+                    for (let j = 1; j <= N; j++) {
+                        let diag = matrix[i-1][j-1] + (A[i-1] === B[j-1] ? this.MATCH : this.MISMATCH);
+                        let up = matrix[i-1][j] + this.GAP;
+                        let left = matrix[i][j-1] + this.GAP;
+                        matrix[i][j] = Math.max(diag, up, left);
+                    }
+                }
+
+                let i = M, j = N, path = [{i, j}];
+                while (i > 0 || j > 0) {
+                    let cur = matrix[i][j];
+                    if (i > 0 && j > 0 && cur === matrix[i-1][j-1] + (A[i-1] === B[j-1] ? this.MATCH : this.MISMATCH)) { i--; j--; }
+                    else if (i > 0 && cur === matrix[i-1][j] + this.GAP) { i--; }
+                    else { j--; }
+                    path.push({i, j});
+                }
+                return { matrix, tracebackPath: path.reverse() };
+            },
+
+            async renderTableVisually(matrix, path) {
+                const table = document.getElementById('dp-table');
+                const M = this.seqA.length, N = this.seqB.length;
+                table.innerHTML = '';
+                document.getElementById('matrix-status').innerText = "RENDERING...";
+
+                let trHeader = document.createElement('tr');
+                trHeader.innerHTML = `<th class="sticky-col">Ø</th><th>-</th>`;
+                for(let j=0; j<N; j++) trHeader.innerHTML += `<th class="text-purple-400">${this.seqB[j]}</th>`;
+                table.appendChild(trHeader);
+
+                let cellDOM = [];
+                for(let i=0; i<=M; i++) {
+                    let tr = document.createElement('tr');
+                    let rowHtml = `<th class="sticky-col ${i>0 ? 'text-blue-400' : ''}">${i===0 ? '-' : this.seqA[i-1]}</th>`;
+                    for(let j=0; j<=N; j++) rowHtml += `<td class="cell-base"></td>`;
+                    tr.innerHTML = rowHtml;
+                    table.appendChild(tr);
+                    
+                    let rowDOM = [];
+                    for(let j=0; j<=N; j++) rowDOM.push(table.rows[i+1].cells[j+1]);
+                    cellDOM.push(rowDOM);
+                }
+
+                for (let i = 0; i <= M; i++) {
+                    for (let j = 0; j <= N; j++) {
+                        cellDOM[i][j].innerText = matrix[i][j];
+                        cellDOM[i][j].className = "cell-calculated";
+                    }
+                    if(i % 5 === 0) await this.sleep(1); // Rapid render chunking
+                }
+
+                document.getElementById('matrix-status').innerText = "TRACING PATH...";
+                for (let k = 0; k < path.length; k++) {
+                    let pos = path[k];
+                    cellDOM[pos.i][pos.j].className = "cell-path";
+                    let wrapper = document.getElementById('matrix-wrapper');
+                    wrapper.scrollTop = cellDOM[pos.i][pos.j].offsetTop - wrapper.clientHeight/2;
+                    wrapper.scrollLeft = cellDOM[pos.i][pos.j].offsetLeft - wrapper.clientWidth/2;
+                    await this.sleep(10);
+                }
+
+                document.getElementById('matrix-status').innerText = `DONE (SCORE: ${matrix[M][N]})`;
+            },
+
+            reconstructAlignment(path) {
+                let alignA = "", alignB = "", alignMap = "";
+                for(let k = 1; k < path.length; k++) {
+                    let prev = path[k-1], curr = path[k];
+                    if (curr.i > prev.i && curr.j > prev.j) {
+                        alignA += this.seqA[curr.i - 1]; alignB += this.seqB[curr.j - 1];
+                        alignMap += (this.seqA[curr.i - 1] === this.seqB[curr.j - 1]) ? "|" : "x";
+                    } else if (curr.i > prev.i) {
+                        alignA += this.seqA[curr.i - 1]; alignB += "-"; alignMap += " ";
+                    } else {
+                        alignA += "-"; alignB += this.seqB[curr.j - 1]; alignMap += " ";
+                    }
+                }
+
+                document.getElementById('out-ref').innerHTML = ''; document.getElementById('out-mut').innerHTML = ''; document.getElementById('out-map').innerHTML = '';
+                for(let k=0; k<alignMap.length; k++) {
+                    document.getElementById('out-ref').innerHTML += `<span>${alignA[k]}</span>`;
+                    if(alignMap[k] === '|') {
+                        document.getElementById('out-map').innerHTML += `<span class="text-emerald-500">|</span>`;
+                        document.getElementById('out-mut').innerHTML += `<span class="text-emerald-500">${alignB[k]}</span>`;
+                    } else if (alignMap[k] === 'x') {
+                        document.getElementById('out-map').innerHTML += `<span class="text-orange-500">*</span>`;
+                        document.getElementById('out-mut').innerHTML += `<span class="text-orange-500 bg-orange-900/30 px-0.5 rounded">${alignB[k]}</span>`;
+                    } else {
+                        document.getElementById('out-map').innerHTML += `<span> </span>`;
+                        document.getElementById('out-mut').innerHTML += `<span class="text-red-500 font-bold">-</span>`;
+                    }
+                }
+                return { alignA, alignB, alignMap };
+            },
+
+            computeMetrics(alignMap) {
+                let matches = 0, snps = 0, gaps = 0, totalLen = alignMap.length;
+                for(let k = 0; k < totalLen; k++) {
+                    if(alignMap[k] === '|') matches++; else if(alignMap[k] === 'x') snps++; else gaps++;
+                }
+
+                document.getElementById('stat-match').innerText = matches;
+                document.getElementById('stat-snp').innerText = snps;
+                document.getElementById('stat-gap').innerText = gaps;
+                document.getElementById('lbl-identity').innerText = `${((matches / totalLen) * 100).toFixed(1)}%`;
+            },
+
+            translateToProtein(seq) {
+                const codons = {
+                    'ATG':'MET', 'GCT':'ALA', 'GCC':'ALA', 'GCA':'ALA', 'GCG':'ALA', 'CGT':'ARG', 'CGC':'ARG', 'CGA':'ARG', 'CGG':'ARG', 'AGA':'ARG', 'AGG':'ARG',
+                    'AAT':'ASN', 'AAC':'ASN', 'GAT':'ASP', 'GAC':'ASP', 'TGT':'CYS', 'TGC':'CYS', 'CAA':'GLN', 'CAG':'GLN', 'GAA':'GLU', 'GAG':'GLU', 'GGT':'GLY',
+                    'GGC':'GLY', 'GGA':'GLY', 'GGG':'GLY', 'CAT':'HIS', 'CAC':'HIS', 'ATT':'ILE', 'ATC':'ILE', 'ATA':'ILE', 'TTA':'LEU', 'TTG':'LEU', 'CTT':'LEU',
+                    'CTC':'LEU', 'CTA':'LEU', 'CTG':'LEU', 'AAA':'LYS', 'AAG':'LYS', 'TTT':'PHE', 'TTC':'PHE', 'CCT':'PRO', 'CCC':'PRO', 'CCA':'PRO', 'CCG':'PRO',
+                    'TCT':'SER', 'TCC':'SER', 'TCA':'SER', 'TCG':'SER', 'AGT':'SER', 'AGC':'SER', 'ACT':'THR', 'ACC':'THR', 'ACA':'THR', 'ACG':'THR', 'TGG':'TRP',
+                    'TAT':'TYR', 'TAC':'TYR', 'GTT':'VAL', 'GTC':'VAL', 'GTA':'VAL', 'GTG':'VAL', 'TAA':'STOP', 'TGA':'STOP', 'TAG':'STOP'
+                };
+                let cleanSeq = seq.replace(/-/g, ''), proteinStr = "";
+                for(let i = 0; i < cleanSeq.length - 2; i += 3) {
+                    let amino = codons[cleanSeq.substring(i, i+3)] || 'UNK';
+                    if (amino === 'STOP') proteinStr += `<span class="text-red-500 font-bold bg-red-900/20 px-1 mx-1 rounded">[STOP]</span>`;
+                    else if (amino === 'UNK') proteinStr += `<span class="text-gray-500 mx-1">...</span>`;
+                    else proteinStr += `<span class="text-blue-300 mx-1 border-b border-gray-700">${amino}</span>`;
+                }
+                document.getElementById('out-protein').innerHTML = proteinStr || "Sequence too short.";
+            },
+
+            exportCSV() {
+                if(!this.calcMatrix) return;
+                let csvContent = "data:text/csv;charset=utf-8,.,-," + this.seqB.split('').join(',') + "\n";
+                for(let i=0; i<=this.seqA.length; i++) csvContent += (i===0 ? "-" : this.seqA[i-1]) + "," + this.calcMatrix[i].join(',') + "\n";
+                let link = document.createElement("a");
+                link.setAttribute("href", encodeURI(csvContent));
+                link.setAttribute("download", "dp_matrix_export.csv");
+                document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            }
+        };
+
+        document.addEventListener('DOMContentLoaded', () => { AppEngine.init(); });
+    </script>
+</body>
+</html>
